@@ -1,6 +1,6 @@
 """
 File: sankey.py
-Author: Ian Solberg
+Author: Cassie Cinzori & Ian Solberg
 Description: reusable sankey builder library
 """
 
