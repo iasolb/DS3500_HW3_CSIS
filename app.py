@@ -1,6 +1,7 @@
 import panel as pn
 import geopandas as gpd
 import folium
+import pandas as pd
 
 pn.extension()
 
@@ -10,7 +11,9 @@ mbta_lines = gpd.read_file(
 mbta_stations = gpd.read_file(
     "data/MBTA_data/MBTA Rapid Transit Labels/GISDATA_MBTA_NODEPoint.shp"
 )
-dorms = gpd.read_file("data/NortheasternDorm_data/layers/POINT.shp")
+dorms = pd.read_csv("data/NortheasternDorm_data/dorms_with_prices.csv")
+dorms["geometry"] = gpd.GeoSeries.from_wkt(dorms["geometry"])
+dorms = gpd.GeoDataFrame(dorms, geometry="geometry", crs="EPSG:4326")
 
 line_colors = {
     "RED": "red",
@@ -56,9 +59,14 @@ def create_folium_map(
 
     if show_dorms:
         for idx, dorm in dorms.iterrows():
+            # Handle None/missing values
+            price = dorm["Price"] if dorm["Price"] is not None else "N/A"
+
             folium.Marker(
                 location=[dorm.geometry.y, dorm.geometry.x],
-                popup=dorm["Name"],
+                popup=f"""Dorm Name: {dorm['Name']}<br>
+                        Price Per Semester: {dorm['Price']}<br>
+                        Estimated Price per Month (SemPrice/4): {dorm['MonthlyPriceEstimate']}""",
                 icon=folium.Icon(color="red", icon="home", prefix="fa"),
             ).add_to(m)
 
