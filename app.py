@@ -8,27 +8,21 @@ pn.extension()
 
 api = DashApi()
 
-mbta_lines = api.get_GDF(
-    "data/MBTA_data/MBTA Rapid Transit Lines/GISDATA_MBTA_ARCLine.shp", shapefile=True
+# load all data
+
+data = api.load_all_data()
+mbta_lines, mbta_stations, dorms, food_retail, trader_joes = (
+    data["mbta_lines"],
+    data["mbta_stations"],
+    data["dorms"],
+    data["food_retail"],
+    data["trader_joes"],
 )
-mbta_stations = api.get_GDF(
-    "data/MBTA_data/MBTA Rapid Transit Labels/GISDATA_MBTA_NODEPoint.shp",
-    shapefile=True,
-)
-dorms = api.get_GDF("data/NortheasternDorm_data/dorms_with_prices.csv", shapefile=False)
-food_retail = api.get_GDF("data/Food_Data/food_retail.shp", shapefile=True)
-trader_joes = api.get_GDF("data/Food_Data/trader_joes.shp", shapefile=True)
 
 convenience_stores = api.get_convenience_stores(food_retail)
 grocery_stores = api.get_grocery_stores(food_retail)
 boston_tjs = api.get_boston_trader_joes(trader_joes)
-
-convenience_stores, grocery_stores, boston_tjs = api.align_crs(
-    dorms, convenience_stores, grocery_stores, boston_tjs
-)
-
 line_colors = api.get_line_colors()
-
 dorms = api.add_nearest_store_columns(
     dorms, convenience_stores, grocery_stores, boston_tjs
 )

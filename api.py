@@ -1,73 +1,171 @@
 import pandas as pd
 import geopandas as gpd
+from typing import Dict, Tuple, Optional
 
 
 class DashApi:
+    """API for loading and processing geographic and transit data for the MBTA dashboard."""
 
-    def get_GDF(self, filepath: str, shapefile=False):
+    # Constants
+    BOSTON_ZIPS = [2116, 2115, 2446, 2139, 2494, 2476, 2465, 2138, 1803, 1906, 1960]
+    STORE_TYPE_CONVENIENCE = "Convenience Stores, Pharmacies, and Drug Stores"
+    STORE_TYPE_GROCERY = "Supermarket or Other Grocery"
+    METERS_PER_MILE = 1609.34
+    UTM_ZONE_19N = "EPSG:32619"  # For accurate distance calculation in Boston area
+    WGS84 = "EPSG:4326"
+
+    LINE_COLORS = {
+        "RED": "red",
+        "ORANGE": "orange",
+        "GREEN": "green",
+        "BLUE": "blue",
+        "SILVER": "gray",
+    }
+
+    # ============================================================================
+    # Data Loading Methods
+    # ============================================================================
+
+    def get_GDF(self, filepath: str, shapefile: bool = False) -> gpd.GeoDataFrame:
+        """
+        Load geographic data from either a shapefile or CSV.
+
+        Args:
+            filepath: Path to the data file
+            shapefile: If True, load as shapefile. If False, load as CSV with WKT geometry
+
+        Returns:
+            GeoDataFrame with the loaded data
+        """
         if shapefile:
             gdf = gpd.read_file(filepath)
         else:
             df = pd.read_csv(filepath)
             df["geometry"] = gpd.GeoSeries.from_wkt(df["geometry"])
-            gdf = gpd.GeoDataFrame(df, geometry="geometry", crs="EPSG:4326")
+            gdf = gpd.GeoDataFrame(df, geometry="geometry", crs=self.WGS84)
         return gdf
 
-    def get_line_colors(self):
-        line_colors = {
-            "RED": "red",
-            "ORANGE": "orange",
-            "GREEN": "green",
-            "BLUE": "blue",
-            "SILVER": "gray",
-        }
-        return line_colors
+    def load_all_data(self, data_dir: str = "data") -> Dict[str, gpd.GeoDataFrame]:
+        """
+        Load all required datasets for the dashboard.
 
-    def get_convenience_stores(self, data: pd.DataFrame):
-        """
-        data: pd.DataFrame
-        Used for food_retail dataset,
-        filters for convenience stores on store_type column
-        returns: pd.DataFrame subset of convenience stores
-        """
-        convenience_stores = data[
-            data["store_type"] == "Convenience Stores, Pharmacies, and Drug Stores"
-        ]
-        return convenience_stores
-
-    def get_grocery_stores(self, data: pd.DataFrame):
-        """
-        data: pd.DataFrame
-        Used for food_retail dataset,
-        filters for grocery stores on store_type column
-        returns: pd.DataFrame subset of grocery stores
-        """
-        grocery_stores = data[data["store_type"] == "Supermarket or Other Grocery"]
-        return grocery_stores
-
-    def get_boston_trader_joes(self, data: pd.DataFrame):
-        """
-        data: pd.DataFrame
-        Used for food_retail dataset,
-        filters for trader joe's stores on store_name column
-        returns: pd.DataFrame subset of trader joe's stores
-        """
-        boston_zips = [2116, 2115, 2446, 2139, 2494, 2476, 2465, 2138, 1803, 1906, 1960]
-        boston_tjs = data[data["postal_cod"].isin(boston_zips)]
-        return boston_tjs
-
-    def align_crs(self, dorms, convenience_stores, grocery_stores, boston_tjs):
-        """
-        Aligns the coordinate reference systems (CRS) of multiple GeoDataFrames to ensure they match.
-
-        Parameters:
-        dorms (gpd.GeoDataFrame): GeoDataFrame containing dormitory locations.
-        convencience_stores (gpd.GeoDataFrame): GeoDataFrame containing convenience store locations.
-        grocery_stores (gpd.GeoDataFrame): GeoDataFrame containing grocery store locations.
-        trader_joes (gpd.GeoDataFrame): GeoDataFrame containing Trader Joe's store locations.
+        Args:
+            data_dir: Base directory containing data folders
 
         Returns:
-        tuple: A tuple containing the aligned GeoDataFrames in the order they were provided.
+            Dictionary with keys: mbta_lines, mbta_stations, dorms, food_retail, trader_joes
+        """
+        return {
+            "mbta_lines": self.get_GDF(
+                f"{data_dir}/MBTA_data/MBTA Rapid Transit Lines/GISDATA_MBTA_ARCLine.shp",
+                shapefile=True,
+            ),
+            "mbta_stations": self.get_GDF(
+                f"{data_dir}/MBTA_data/MBTA Rapid Transit Labels/GISDATA_MBTA_NODEPoint.shp",
+                shapefile=True,
+            ),
+            "dorms": self.get_GDF(
+                f"{data_dir}/NortheasternDorm_data/dorms_with_prices.csv",
+                shapefile=False,
+            ),
+            "food_retail": self.get_GDF(
+                f"{data_dir}/Food_Data/food_retail.shp", shapefile=True
+            ),
+            "trader_joes": self.get_GDF(
+                f"{data_dir}/Food_Data/trader_joes.shp", shapefile=True
+            ),
+        }
+
+    # ============================================================================
+    # Configuration Getters
+    # ============================================================================
+
+    def get_line_colors(self) -> Dict[str, str]:
+        """Get the color mapping for MBTA transit lines."""
+        return self.LINE_COLORS
+
+    def get_boston_zips(self) -> list:
+        """Get list of Boston-area zip codes."""
+        return self.BOSTON_ZIPS
+
+    # ============================================================================
+    # Data Filtering Methods
+    # ============================================================================
+
+    def filter_by_column(self, data: pd.DataFrame, column: str, value) -> pd.DataFrame:
+        """
+        Generic filter for DataFrame columns.
+
+        Args:
+            data: DataFrame to filter
+            column: Column name to filter on
+            value: Value to match (can be single value or list for .isin())
+
+        Returns:
+            Filtered DataFrame
+        """
+        if isinstance(value, list):
+            return data[data[column].isin(value)]
+        return data[data[column] == value]
+
+    def get_convenience_stores(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter food retail data for convenience stores and pharmacies.
+
+        Args:
+            data: Food retail DataFrame
+
+        Returns:
+            DataFrame subset containing only convenience stores/pharmacies
+        """
+        return self.filter_by_column(data, "store_type", self.STORE_TYPE_CONVENIENCE)
+
+    def get_grocery_stores(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter food retail data for grocery stores.
+
+        Args:
+            data: Food retail DataFrame
+
+        Returns:
+            DataFrame subset containing only grocery stores
+        """
+        return self.filter_by_column(data, "store_type", self.STORE_TYPE_GROCERY)
+
+    def get_boston_trader_joes(self, data: pd.DataFrame) -> pd.DataFrame:
+        """
+        Filter Trader Joe's data for Boston-area locations.
+
+        Args:
+            data: Trader Joe's DataFrame
+
+        Returns:
+            DataFrame subset containing only Boston-area Trader Joe's
+        """
+        return self.filter_by_column(data, "postal_cod", self.BOSTON_ZIPS)
+
+    # ============================================================================
+    # CRS and Geometry Operations
+    # ============================================================================
+
+    def align_crs(
+        self,
+        dorms: gpd.GeoDataFrame,
+        convenience_stores: gpd.GeoDataFrame,
+        grocery_stores: gpd.GeoDataFrame,
+        boston_tjs: gpd.GeoDataFrame,
+    ) -> Tuple[gpd.GeoDataFrame, gpd.GeoDataFrame, gpd.GeoDataFrame]:
+        """
+        Align the coordinate reference systems (CRS) of store GeoDataFrames to match dorms.
+
+        Args:
+            dorms: GeoDataFrame containing dormitory locations (reference CRS)
+            convenience_stores: GeoDataFrame containing convenience store locations
+            grocery_stores: GeoDataFrame containing grocery store locations
+            boston_tjs: GeoDataFrame containing Trader Joe's store locations
+
+        Returns:
+            Tuple of (convenience_stores, grocery_stores, boston_tjs) with aligned CRS
         """
         if convenience_stores.crs != dorms.crs:
             convenience_stores = convenience_stores.to_crs(dorms.crs)
@@ -77,53 +175,101 @@ class DashApi:
             boston_tjs = boston_tjs.to_crs(dorms.crs)
         return convenience_stores, grocery_stores, boston_tjs
 
+    def find_nearest_store(
+        self, dorm_geom, stores_gdf: gpd.GeoDataFrame
+    ) -> Tuple[Optional[float], Optional[pd.Series]]:
+        """
+        Find the nearest store to a dorm location and calculate distance in meters.
+
+        Uses UTM projection for accurate distance calculation.
+
+        Args:
+            dorm_geom: Geometry of the dorm location
+            stores_gdf: GeoDataFrame containing store locations
+
+        Returns:
+            Tuple of (distance_in_meters, nearest_store_row) or (None, None) if no stores
+        """
+        if len(stores_gdf) == 0:
+            return None, None
+
+        # Convert to projected CRS for accurate distance calculation (UTM Zone 19N for Boston)
+        dorm_proj = gpd.GeoSeries([dorm_geom], crs=self.WGS84).to_crs(self.UTM_ZONE_19N)
+        stores_proj = stores_gdf.to_crs(self.UTM_ZONE_19N)
+
+        distances = stores_proj.distance(dorm_proj.iloc[0])
+        min_distance = distances.min()
+        nearest_store_idx = distances.argmin()
+        nearest_store = stores_gdf.iloc[nearest_store_idx]
+
+        return min_distance, nearest_store
+
+    def _add_store_info_to_dorm(
+        self,
+        dorms: gpd.GeoDataFrame,
+        idx: int,
+        dist: Optional[float],
+        store: Optional[pd.Series],
+        prefix: str,
+        store_name_key: str = "store_name",
+    ) -> None:
+        """
+        Helper method to add nearest store information to a dorm row.
+
+        Args:
+            dorms: GeoDataFrame to modify
+            idx: Index of the dorm row
+            dist: Distance to nearest store in meters
+            store: Series containing store information
+            prefix: Prefix for column names (e.g., 'grocery', 'pharmacy', 'tj')
+            store_name_key: Key to use for store name in the store Series
+        """
+        if dist is not None:
+            dorms.at[idx, f"nearest_{prefix}_dist_m"] = dist
+            dorms.at[idx, f"nearest_{prefix}_miles"] = dist / self.METERS_PER_MILE
+            dorms.at[idx, f"nearest_{prefix}_name"] = store.get(
+                store_name_key, "Unknown"
+            )
+            dorms.at[idx, f"nearest_{prefix}_geom"] = store.geometry
+
     def add_nearest_store_columns(
-        self, dorms, convenience_stores, grocery_stores, boston_tjs
-    ):
-        def find_nearest_store(dorm_geom, stores_gdf):
-            """Find distance to nearest store in meters"""
-            if len(stores_gdf) == 0:
-                return None, None
+        self,
+        dorms: gpd.GeoDataFrame,
+        convenience_stores: gpd.GeoDataFrame,
+        grocery_stores: gpd.GeoDataFrame,
+        boston_tjs: gpd.GeoDataFrame,
+    ) -> gpd.GeoDataFrame:
+        """
+        Add columns to dorms GeoDataFrame with information about nearest stores.
 
-            # Convert to projected CRS for accurate distance calculation (UTM Zone 19N for Boston)
-            dorm_proj = gpd.GeoSeries([dorm_geom], crs="EPSG:4326").to_crs("EPSG:32619")
-            stores_proj = stores_gdf.to_crs("EPSG:32619")
+        For each dorm, calculates and adds:
+        - Distance to nearest grocery store (meters and miles)
+        - Name and geometry of nearest grocery store
+        - Distance to nearest pharmacy (meters and miles)
+        - Name and geometry of nearest pharmacy
+        - Distance to nearest Trader Joe's (meters and miles)
+        - Name and geometry of nearest Trader Joe's
 
-            distances = stores_proj.distance(dorm_proj.iloc[0])
-            min_distance = distances.min()
-            nearest_store_idx = distances.argmin()
-            nearest_store = stores_gdf.iloc[nearest_store_idx]
+        Args:
+            dorms: GeoDataFrame containing dormitory locations
+            convenience_stores: GeoDataFrame containing convenience store/pharmacy locations
+            grocery_stores: GeoDataFrame containing grocery store locations
+            boston_tjs: GeoDataFrame containing Trader Joe's locations
 
-            return min_distance, nearest_store
-
+        Returns:
+            Modified dorms GeoDataFrame with added nearest store columns
+        """
         for idx, dorm in dorms.iterrows():
+            # Find and add nearest grocery store
+            dist, store = self.find_nearest_store(dorm.geometry, grocery_stores)
+            self._add_store_info_to_dorm(dorms, idx, dist, store, "grocery")
 
-            # Grocery stores
-            dist, store = find_nearest_store(dorm.geometry, grocery_stores)
-            if dist is not None:
-                dorms.at[idx, "nearest_grocery_dist_m"] = dist
-                dorms.at[idx, "nearest_grocery_miles"] = dist / 1609.34
-                dorms.at[idx, "nearest_grocery_name"] = store.get(
-                    "store_name", "Unknown"
-                )
-                dorms.at[idx, "nearest_grocery_geom"] = store.geometry
+            # Find and add nearest pharmacy
+            dist, store = self.find_nearest_store(dorm.geometry, convenience_stores)
+            self._add_store_info_to_dorm(dorms, idx, dist, store, "pharmacy")
 
-            # Pharmacies
-            dist, store = find_nearest_store(dorm.geometry, convenience_stores)
-            if dist is not None:
-                dorms.at[idx, "nearest_pharmacy_dist_m"] = dist
-                dorms.at[idx, "nearest_pharmacy_miles"] = dist / 1609.34
-                dorms.at[idx, "nearest_pharmacy_name"] = store.get(
-                    "store_name", "Unknown"
-                )
-                dorms.at[idx, "nearest_pharmacy_geom"] = store.geometry
+            # Find and add nearest Trader Joe's
+            dist, store = self.find_nearest_store(dorm.geometry, boston_tjs)
+            self._add_store_info_to_dorm(dorms, idx, dist, store, "tj", "name")
 
-            # Trader Joe's
-            dist, store = find_nearest_store(dorm.geometry, boston_tjs)
-            if dist is not None:
-                dorms.at[idx, "nearest_tj_dist_m"] = dist
-                dorms.at[idx, "nearest_tj_miles"] = dist / 1609.34
-                dorms.at[idx, "nearest_tj_name"] = store.get("name", "Trader Joe's")
-                dorms.at[idx, "nearest_tj_geom"] = store.geometry
-
-            return dorms
+        return dorms
