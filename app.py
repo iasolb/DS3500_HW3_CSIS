@@ -16,10 +16,8 @@ mbta_stations = api.get_GDF(
     shapefile=True,
 )
 dorms = api.get_GDF("data/NortheasternDorm_data/dorms_with_prices.csv", shapefile=False)
-
-
-food_retail = gpd.read_file("data/Food_Data/food_retail.shp", shapefile=True)
-trader_joes = gpd.read_file("data/Food_Data/trader_joes.shp", shapefile=True)
+food_retail = api.get_GDF("data/Food_Data/food_retail.shp", shapefile=True)
+trader_joes = api.get_GDF("data/Food_Data/trader_joes.shp", shapefile=True)
 
 convenience_stores = api.get_convenience_stores(food_retail)
 grocery_stores = api.get_grocery_stores(food_retail)
