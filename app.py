@@ -2,44 +2,35 @@ import panel as pn
 import geopandas as gpd
 import folium
 import pandas as pd
+from api import DashApi
 
 pn.extension()
 
-mbta_lines = gpd.read_file(
-    "data/MBTA_data/MBTA Rapid Transit Lines/GISDATA_MBTA_ARCLine.shp"
+api = DashApi()
+
+mbta_lines = api.get_GDF(
+    "data/MBTA_data/MBTA Rapid Transit Lines/GISDATA_MBTA_ARCLine.shp", shapefile=True
 )
-mbta_stations = gpd.read_file(
-    "data/MBTA_data/MBTA Rapid Transit Labels/GISDATA_MBTA_NODEPoint.shp"
+mbta_stations = api.get_GDF(
+    "data/MBTA_data/MBTA Rapid Transit Labels/GISDATA_MBTA_NODEPoint.shp",
+    shapefile=True,
 )
-dorms = pd.read_csv("data/NortheasternDorm_data/dorms_with_prices.csv")
-dorms["geometry"] = gpd.GeoSeries.from_wkt(dorms["geometry"])
-dorms = gpd.GeoDataFrame(dorms, geometry="geometry", crs="EPSG:4326")
+dorms = api.get_GDF("data/NortheasternDorm_data/dorms_with_prices.csv", shapefile=False)
 
-line_colors = {
-    "RED": "red",
-    "ORANGE": "orange",
-    "GREEN": "green",
-    "BLUE": "blue",
-    "SILVER": "gray",
-}
 
-# Adding food retail
-food_retail = gpd.read_file("data/Food_Data/food_retail.shp")
-convenience_stores = food_retail[food_retail['store_type'] == "Convenience Stores, Pharmacies, and Drug Stores"]
-grocery_stores = food_retail[food_retail['store_type'] == "Supermarket or Other Grocery"]
+food_retail = gpd.read_file("data/Food_Data/food_retail.shp", shapefile=True)
+trader_joes = gpd.read_file("data/Food_Data/trader_joes.shp", shapefile=True)
 
-# Adding Trader Joe's
-trader_joes = gpd.read_file("data/Food_Data/trader_joes.shp")
-boston_zips = [2116, 2115, 2446, 2139, 2494, 2476, 2465, 2138, 1803, 1906, 1960]
-boston_tjs = trader_joes[trader_joes['postal_cod'].isin(boston_zips)]
+convenience_stores = api.get_convenience_stores(food_retail)
+grocery_stores = api.get_grocery_stores(food_retail)
+boston_tjs = api.get_boston_trader_joes(trader_joes)
 
-# Ensure stores are in same CRS as dorms
-if convenience_stores.crs != dorms.crs:
-    convenience_stores = convenience_stores.to_crs(dorms.crs)
-if grocery_stores.crs != dorms.crs:
-    grocery_stores = grocery_stores.to_crs(dorms.crs)
-if boston_tjs.crs != dorms.crs:
-    boston_tjs = boston_tjs.to_crs(dorms.crs)
+convenience_stores, grocery_stores, boston_tjs = api.align_crs(
+    dorms, convenience_stores, grocery_stores, boston_tjs
+)
+
+line_colors = api.get_line_colors()
+
 
 # CALCULATIONS
 # Calculate Distance
@@ -66,33 +57,38 @@ for idx, dorm in dorms.iterrows():
     # Grocery stores
     dist, store = find_nearest_store(dorm.geometry, grocery_stores)
     if dist is not None:
-        dorms.at[idx, 'nearest_grocery_dist_m'] = dist
-        dorms.at[idx, 'nearest_grocery_miles'] = dist / 1609.34
-        dorms.at[idx, 'nearest_grocery_name'] = store.get('store_name', 'Unknown')
-        dorms.at[idx, 'nearest_grocery_geom'] = store.geometry
+        dorms.at[idx, "nearest_grocery_dist_m"] = dist
+        dorms.at[idx, "nearest_grocery_miles"] = dist / 1609.34
+        dorms.at[idx, "nearest_grocery_name"] = store.get("store_name", "Unknown")
+        dorms.at[idx, "nearest_grocery_geom"] = store.geometry
 
     # Pharmacies
     dist, store = find_nearest_store(dorm.geometry, convenience_stores)
     if dist is not None:
-        dorms.at[idx, 'nearest_pharmacy_dist_m'] = dist
-        dorms.at[idx, 'nearest_pharmacy_miles'] = dist / 1609.34
-        dorms.at[idx, 'nearest_pharmacy_name'] = store.get('store_name', 'Unknown')
-        dorms.at[idx, 'nearest_pharmacy_geom'] = store.geometry
+        dorms.at[idx, "nearest_pharmacy_dist_m"] = dist
+        dorms.at[idx, "nearest_pharmacy_miles"] = dist / 1609.34
+        dorms.at[idx, "nearest_pharmacy_name"] = store.get("store_name", "Unknown")
+        dorms.at[idx, "nearest_pharmacy_geom"] = store.geometry
 
     # Trader Joe's
     dist, store = find_nearest_store(dorm.geometry, boston_tjs)
     if dist is not None:
-        dorms.at[idx, 'nearest_tj_dist_m'] = dist
-        dorms.at[idx, 'nearest_tj_miles'] = dist / 1609.34
-        dorms.at[idx, 'nearest_tj_name'] = store.get('name', 'Trader Joe\'s')
-        dorms.at[idx, 'nearest_tj_geom'] = store.geometry
+        dorms.at[idx, "nearest_tj_dist_m"] = dist
+        dorms.at[idx, "nearest_tj_miles"] = dist / 1609.34
+        dorms.at[idx, "nearest_tj_name"] = store.get("name", "Trader Joe's")
+        dorms.at[idx, "nearest_tj_geom"] = store.geometry
 
 
 # CALLBACKS
 def create_folium_map(
-    show_lines=True, show_stations=True, show_dorms=True,
-    show_grocery=False, show_pharmacy=False, show_tj=False, show_distance_lines=False,
-    selected_lines=None
+    show_lines=True,
+    show_stations=True,
+    show_dorms=True,
+    show_grocery=False,
+    show_pharmacy=False,
+    show_tj=False,
+    show_distance_lines=False,
+    selected_lines=None,
 ):
     m = folium.Map(location=[42.3601, -71.0589], zoom_start=12)
 
@@ -129,15 +125,19 @@ def create_folium_map(
                             <b>Price Per Semester:</b> {dorm['Price']}<br>
                             <b>Monthly Estimate:</b> {dorm['MonthlyPriceEstimate']}"""
 
-            if 'nearest_grocery_miles' in dorm and pd.notna(dorm['nearest_grocery_miles']):
+            if "nearest_grocery_miles" in dorm and pd.notna(
+                dorm["nearest_grocery_miles"]
+            ):
                 popup_text += f"""<br><br><b>Nearest Grocery:</b> {dorm['nearest_grocery_name']}<br>
                                     <b>Distance:</b> {dorm['nearest_grocery_miles']:.2f} miles"""
 
-            if 'nearest_pharmacy_miles' in dorm and pd.notna(dorm['nearest_pharmacy_miles']):
+            if "nearest_pharmacy_miles" in dorm and pd.notna(
+                dorm["nearest_pharmacy_miles"]
+            ):
                 popup_text += f"""<br><br><b>Nearest Pharmacy:</b> {dorm['nearest_pharmacy_name']}<br>
                                     <b>Distance:</b> {dorm['nearest_pharmacy_miles']:.2f} miles"""
 
-            if 'nearest_tj_miles' in dorm and pd.notna(dorm['nearest_tj_miles']):
+            if "nearest_tj_miles" in dorm and pd.notna(dorm["nearest_tj_miles"]):
                 popup_text += f"""<br><br><b>Nearest Trader Joe's:</b> {dorm['nearest_tj_name']}<br>
                                     <b>Distance:</b> {dorm['nearest_tj_miles']:.2f} miles"""
 
@@ -149,40 +149,58 @@ def create_folium_map(
 
             # Add distance lines if enabled
             if show_distance_lines:
-                if show_grocery and 'nearest_grocery_geom' in dorm and pd.notna(dorm['nearest_grocery_geom']):
+                if (
+                    show_grocery
+                    and "nearest_grocery_geom" in dorm
+                    and pd.notna(dorm["nearest_grocery_geom"])
+                ):
                     folium.PolyLine(
                         locations=[
                             [dorm.geometry.y, dorm.geometry.x],
-                            [dorm['nearest_grocery_geom'].y, dorm['nearest_grocery_geom'].x]
+                            [
+                                dorm["nearest_grocery_geom"].y,
+                                dorm["nearest_grocery_geom"].x,
+                            ],
                         ],
-                        color='green',
+                        color="green",
                         weight=2,
                         opacity=0.5,
-                        dash_array='5'
+                        dash_array="5",
                     ).add_to(m)
 
-                if show_pharmacy and 'nearest_pharmacy_geom' in dorm and pd.notna(dorm['nearest_pharmacy_geom']):
+                if (
+                    show_pharmacy
+                    and "nearest_pharmacy_geom" in dorm
+                    and pd.notna(dorm["nearest_pharmacy_geom"])
+                ):
                     folium.PolyLine(
                         locations=[
                             [dorm.geometry.y, dorm.geometry.x],
-                            [dorm['nearest_pharmacy_geom'].y, dorm['nearest_pharmacy_geom'].x]
+                            [
+                                dorm["nearest_pharmacy_geom"].y,
+                                dorm["nearest_pharmacy_geom"].x,
+                            ],
                         ],
-                        color='purple',
+                        color="purple",
                         weight=2,
                         opacity=0.5,
-                        dash_array='5'
+                        dash_array="5",
                     ).add_to(m)
 
-                if show_tj and 'nearest_tj_geom' in dorm and pd.notna(dorm['nearest_tj_geom']):
+                if (
+                    show_tj
+                    and "nearest_tj_geom" in dorm
+                    and pd.notna(dorm["nearest_tj_geom"])
+                ):
                     folium.PolyLine(
                         locations=[
                             [dorm.geometry.y, dorm.geometry.x],
-                            [dorm['nearest_tj_geom'].y, dorm['nearest_tj_geom'].x]
+                            [dorm["nearest_tj_geom"].y, dorm["nearest_tj_geom"].x],
                         ],
-                        color='orange',
+                        color="orange",
                         weight=2,
                         opacity=0.5,
-                        dash_array='5'
+                        dash_array="5",
                     ).add_to(m)
 
     # Add grocery stores
@@ -190,9 +208,9 @@ def create_folium_map(
         for idx, store in grocery_stores.iterrows():
             folium.Marker(
                 location=[store.geometry.y, store.geometry.x],
-                popup=store.get('store_name', 'Grocery Store'),
-                icon=folium.Icon(color='green', icon='shopping-cart', prefix='fa'),
-                tooltip="Grocery Store"
+                popup=store.get("store_name", "Grocery Store"),
+                icon=folium.Icon(color="green", icon="shopping-cart", prefix="fa"),
+                tooltip="Grocery Store",
             ).add_to(m)
 
     # Add pharmacies
@@ -200,9 +218,9 @@ def create_folium_map(
         for idx, store in convenience_stores.iterrows():
             folium.Marker(
                 location=[store.geometry.y, store.geometry.x],
-                popup=store.get('store_name', 'Pharmacy'),
-                icon=folium.Icon(color='purple', icon='plus', prefix='fa'),
-                tooltip="Pharmacy"
+                popup=store.get("store_name", "Pharmacy"),
+                icon=folium.Icon(color="purple", icon="plus", prefix="fa"),
+                tooltip="Pharmacy",
             ).add_to(m)
 
     # Add Trader Joe's
@@ -210,9 +228,9 @@ def create_folium_map(
         for idx, store in boston_tjs.iterrows():
             folium.Marker(
                 location=[store.geometry.y, store.geometry.x],
-                popup=store.get('name', "Trader Joe's"),
-                icon=folium.Icon(color='orange', icon='shopping-basket', prefix='fa'),
-                tooltip="Trader Joe's"
+                popup=store.get("name", "Trader Joe's"),
+                icon=folium.Icon(color="orange", icon="shopping-basket", prefix="fa"),
+                tooltip="Trader Joe's",
             ).add_to(m)
 
     folium.LayerControl().add_to(m)
@@ -231,7 +249,9 @@ show_dorms_toggle = pn.widgets.Checkbox(name="Show Dorms", value=True)
 show_grocery_toggle = pn.widgets.Checkbox(name="Show Grocery Stores", value=False)
 show_pharmacy_toggle = pn.widgets.Checkbox(name="Show Pharmacies", value=False)
 show_tj_toggle = pn.widgets.Checkbox(name="Show Trader Joe's", value=False)
-show_distance_lines_toggle = pn.widgets.Checkbox(name="Show Distance Lines", value=False)
+show_distance_lines_toggle = pn.widgets.Checkbox(
+    name="Show Distance Lines", value=False
+)
 
 
 initial_map = create_folium_map()
