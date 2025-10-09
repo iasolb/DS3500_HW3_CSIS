@@ -1,6 +1,8 @@
 import pandas as pd
 import geopandas as gpd
 from typing import Dict, Tuple, Optional
+from geopy.geocoders import Nominatim
+from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
 
 class DashApi:
@@ -212,6 +214,7 @@ class DashApi:
         store: Optional[pd.Series],
         prefix: str,
         store_name_key: str = "store_name",
+        default_name: str = "Unknown",
     ) -> None:
         """
         Helper method to add nearest store information to a dorm row.
@@ -228,7 +231,7 @@ class DashApi:
             dorms.at[idx, f"nearest_{prefix}_dist_m"] = dist
             dorms.at[idx, f"nearest_{prefix}_miles"] = dist / self.METERS_PER_MILE
             dorms.at[idx, f"nearest_{prefix}_name"] = store.get(
-                store_name_key, "Unknown"
+                store_name_key, default_name
             )
             dorms.at[idx, f"nearest_{prefix}_geom"] = store.geometry
 
@@ -239,37 +242,79 @@ class DashApi:
         grocery_stores: gpd.GeoDataFrame,
         boston_tjs: gpd.GeoDataFrame,
     ) -> gpd.GeoDataFrame:
-        """
-        Add columns to dorms GeoDataFrame with information about nearest stores.
-
-        For each dorm, calculates and adds:
-        - Distance to nearest grocery store (meters and miles)
-        - Name and geometry of nearest grocery store
-        - Distance to nearest pharmacy (meters and miles)
-        - Name and geometry of nearest pharmacy
-        - Distance to nearest Trader Joe's (meters and miles)
-        - Name and geometry of nearest Trader Joe's
-
-        Args:
-            dorms: GeoDataFrame containing dormitory locations
-            convenience_stores: GeoDataFrame containing convenience store/pharmacy locations
-            grocery_stores: GeoDataFrame containing grocery store locations
-            boston_tjs: GeoDataFrame containing Trader Joe's locations
-
-        Returns:
-            Modified dorms GeoDataFrame with added nearest store columns
-        """
         for idx, dorm in dorms.iterrows():
-            # Find and add nearest grocery store
             dist, store = self.find_nearest_store(dorm.geometry, grocery_stores)
-            self._add_store_info_to_dorm(dorms, idx, dist, store, "grocery")
+            self._add_store_info_to_dorm(
+                dorms,
+                idx,
+                dist,
+                store,
+                "grocery",
+                store_name_key="coname",
+                default_name="Unknown Grocery Store",
+            )
 
-            # Find and add nearest pharmacy
             dist, store = self.find_nearest_store(dorm.geometry, convenience_stores)
-            self._add_store_info_to_dorm(dorms, idx, dist, store, "pharmacy")
+            self._add_store_info_to_dorm(
+                dorms,
+                idx,
+                dist,
+                store,
+                "pharmacy",
+                store_name_key="coname",
+                default_name="Unknown Pharmacy",
+            )
 
-            # Find and add nearest Trader Joe's
             dist, store = self.find_nearest_store(dorm.geometry, boston_tjs)
-            self._add_store_info_to_dorm(dorms, idx, dist, store, "tj", "name")
+            self._add_store_info_to_dorm(
+                dorms,
+                idx,
+                dist,
+                store,
+                "tj",
+                store_name_key="city_name",
+                default_name="Trader Joe's",
+            )
 
         return dorms
+
+    def geocode_address(self, address: str) -> Optional[Tuple[float, float]]:
+        """
+        Geocode an address to latitude/longitude coordinates.
+
+        Args:
+            address: Street address to geocode
+
+            Returns:
+                Tuple of (latitude, longitude) or None if geocoding fails
+        """
+        try:
+            geolocator = Nominatim(user_agent="mbta_dashboard")
+            location = geolocator.geocode(address + ", Boston, MA")
+            if location:
+                return (location.latitude, location.longitude)
+            return None
+        except (GeocoderTimedOut, GeocoderServiceError):
+            return None
+
+    def create_user_location_gdf(
+        self, lat: float, lon: float, address: str
+    ) -> gpd.GeoDataFrame:
+        """
+        Create a GeoDataFrame for a user-provided location.
+
+        Args:
+            lat: Latitude
+            lon: Longitude
+            address: Address string
+
+        Returns:
+            GeoDataFrame with single point
+        """
+        from shapely.geometry import Point
+
+        gdf = gpd.GeoDataFrame(
+            {"address": [address]}, geometry=[Point(lon, lat)], crs=self.WGS84
+        )
+
+        return gdf

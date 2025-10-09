@@ -9,7 +9,6 @@ pn.extension()
 api = DashApi()
 
 # load all data
-
 data = api.load_all_data()
 mbta_lines, mbta_stations, dorms, food_retail, trader_joes = (
     data["mbta_lines"],
@@ -26,6 +25,9 @@ line_colors = api.get_line_colors()
 dorms = api.add_nearest_store_columns(
     dorms, convenience_stores, grocery_stores, boston_tjs
 )
+
+# Global variable to store user location
+user_location = None
 
 
 # CALLBACKS
@@ -152,6 +154,30 @@ def create_folium_map(
                         dash_array="5",
                     ).add_to(m)
 
+    # Add user location if it exists
+    if user_location is not None and len(user_location) > 0:
+        user_loc = user_location.iloc[0]
+        popup_text = f"""<b>Your Location</b><br>
+                        <b>Address:</b> {user_loc['address']}"""
+
+        if pd.notna(user_loc.get("nearest_grocery_miles")):
+            popup_text += f"""<br><br><b>Nearest Grocery:</b> {user_loc['nearest_grocery_name']}<br>
+                            <b>Distance:</b> {user_loc['nearest_grocery_miles']:.2f} miles"""
+
+        if pd.notna(user_loc.get("nearest_pharmacy_miles")):
+            popup_text += f"""<br><br><b>Nearest Pharmacy:</b> {user_loc['nearest_pharmacy_name']}<br>
+                            <b>Distance:</b> {user_loc['nearest_pharmacy_miles']:.2f} miles"""
+
+        if pd.notna(user_loc.get("nearest_tj_miles")):
+            popup_text += f"""<br><br><b>Nearest Trader Joe's:</b> {user_loc['nearest_tj_name']}<br>
+                            <b>Distance:</b> {user_loc['nearest_tj_miles']:.2f} miles"""
+
+        folium.Marker(
+            location=[user_loc.geometry.y, user_loc.geometry.x],
+            popup=folium.Popup(popup_text, max_width=300),
+            icon=folium.Icon(color="blue", icon="user", prefix="fa"),
+        ).add_to(m)
+
     # Add grocery stores
     if show_grocery:
         for idx, store in grocery_stores.iterrows():
@@ -186,7 +212,7 @@ def create_folium_map(
     return m
 
 
-# WIDGETS?
+# WIDGETS
 line_selector = pn.widgets.CheckBoxGroup(
     name="MBTA Lines",
     options=["RED", "ORANGE", "GREEN", "BLUE", "SILVER"],
@@ -201,6 +227,17 @@ show_tj_toggle = pn.widgets.Checkbox(name="Show Trader Joe's", value=False)
 show_distance_lines_toggle = pn.widgets.Checkbox(
     name="Show Distance Lines", value=False
 )
+
+# User location widgets
+address_input = pn.widgets.TextInput(
+    name="Enter Your Address", placeholder="123 Main St, Boston, MA", width=280
+)
+
+geocode_button = pn.widgets.Button(
+    name="Add My Location", button_type="primary", width=280
+)
+
+user_location_info = pn.pane.Markdown("", width=280)
 
 
 initial_map = create_folium_map()
@@ -221,6 +258,56 @@ def update_map(event):
     folium_pane.object = new_map
 
 
+def geocode_user_address(event):
+    global user_location
+
+    address = address_input.value
+    if not address:
+        user_location_info.object = "⚠️ Please enter an address"
+        return
+
+    # Geocode the address
+    coords = api.geocode_address(address)
+
+    if coords is None:
+        user_location_info.object = "❌ Could not find address. Try adding 'Boston, MA'"
+        return
+
+    lat, lon = coords
+
+    # Create GeoDataFrame for user location
+    user_location = api.create_user_location_gdf(lat, lon, address)
+
+    # Calculate distances to nearest stores
+    user_location = api.add_nearest_store_columns(
+        user_location, convenience_stores, grocery_stores, boston_tjs
+    )
+
+    # Format the info message
+    info = f"📍 **Your Location:** {address}\n\n"
+
+    if pd.notna(user_location.iloc[0]["nearest_grocery_miles"]):
+        info += (
+            f"🛒 **Nearest Grocery:** {user_location.iloc[0]['nearest_grocery_name']}\n"
+        )
+        info += f"   └ {user_location.iloc[0]['nearest_grocery_miles']:.2f} miles\n\n"
+
+    if pd.notna(user_location.iloc[0]["nearest_pharmacy_miles"]):
+        info += f"💊 **Nearest Pharmacy:** {user_location.iloc[0]['nearest_pharmacy_name']}\n"
+        info += f"   └ {user_location.iloc[0]['nearest_pharmacy_miles']:.2f} miles\n\n"
+
+    if pd.notna(user_location.iloc[0]["nearest_tj_miles"]):
+        info += (
+            f"�️ **Nearest Trader Joe's:** {user_location.iloc[0]['nearest_tj_name']}\n"
+        )
+        info += f"   └ {user_location.iloc[0]['nearest_tj_miles']:.2f} miles"
+
+    user_location_info.object = info
+
+    # Trigger map update
+    update_map(None)
+
+
 line_selector.param.watch(update_map, "value")
 show_stations_toggle.param.watch(update_map, "value")
 show_dorms_toggle.param.watch(update_map, "value")
@@ -228,6 +315,7 @@ show_grocery_toggle.param.watch(update_map, "value")
 show_pharmacy_toggle.param.watch(update_map, "value")
 show_tj_toggle.param.watch(update_map, "value")
 show_distance_lines_toggle.param.watch(update_map, "value")
+geocode_button.on_click(geocode_user_address)
 
 # DASHBOARD WIDGET CONTAINERS
 card_width = 320
@@ -242,6 +330,11 @@ search_card = pn.Card(
         show_pharmacy_toggle,
         show_tj_toggle,
         show_distance_lines_toggle,
+        "---",
+        "### Your Location",
+        address_input,
+        geocode_button,
+        user_location_info,
     ),
     title="Map Controls",
     width=card_width,
