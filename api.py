@@ -76,3 +76,54 @@ class DashApi:
         if boston_tjs.crs != dorms.crs:
             boston_tjs = boston_tjs.to_crs(dorms.crs)
         return convenience_stores, grocery_stores, boston_tjs
+
+    def add_nearest_store_columns(
+        self, dorms, convenience_stores, grocery_stores, boston_tjs
+    ):
+        def find_nearest_store(dorm_geom, stores_gdf):
+            """Find distance to nearest store in meters"""
+            if len(stores_gdf) == 0:
+                return None, None
+
+            # Convert to projected CRS for accurate distance calculation (UTM Zone 19N for Boston)
+            dorm_proj = gpd.GeoSeries([dorm_geom], crs="EPSG:4326").to_crs("EPSG:32619")
+            stores_proj = stores_gdf.to_crs("EPSG:32619")
+
+            distances = stores_proj.distance(dorm_proj.iloc[0])
+            min_distance = distances.min()
+            nearest_store_idx = distances.argmin()
+            nearest_store = stores_gdf.iloc[nearest_store_idx]
+
+            return min_distance, nearest_store
+
+        for idx, dorm in dorms.iterrows():
+
+            # Grocery stores
+            dist, store = find_nearest_store(dorm.geometry, grocery_stores)
+            if dist is not None:
+                dorms.at[idx, "nearest_grocery_dist_m"] = dist
+                dorms.at[idx, "nearest_grocery_miles"] = dist / 1609.34
+                dorms.at[idx, "nearest_grocery_name"] = store.get(
+                    "store_name", "Unknown"
+                )
+                dorms.at[idx, "nearest_grocery_geom"] = store.geometry
+
+            # Pharmacies
+            dist, store = find_nearest_store(dorm.geometry, convenience_stores)
+            if dist is not None:
+                dorms.at[idx, "nearest_pharmacy_dist_m"] = dist
+                dorms.at[idx, "nearest_pharmacy_miles"] = dist / 1609.34
+                dorms.at[idx, "nearest_pharmacy_name"] = store.get(
+                    "store_name", "Unknown"
+                )
+                dorms.at[idx, "nearest_pharmacy_geom"] = store.geometry
+
+            # Trader Joe's
+            dist, store = find_nearest_store(dorm.geometry, boston_tjs)
+            if dist is not None:
+                dorms.at[idx, "nearest_tj_dist_m"] = dist
+                dorms.at[idx, "nearest_tj_miles"] = dist / 1609.34
+                dorms.at[idx, "nearest_tj_name"] = store.get("name", "Trader Joe's")
+                dorms.at[idx, "nearest_tj_geom"] = store.geometry
+
+            return dorms
