@@ -3,10 +3,22 @@ import geopandas as gpd
 import folium
 import pandas as pd
 from api import DashApi
+from shapely.geometry import Point
 
 pn.extension()
 
 api = DashApi()
+
+# Campus Center coordinates
+CAMPUS_CENTER_LON = -71.08828995722925
+CAMPUS_CENTER_LAT = 42.34010543470205
+
+# Create Campus Center GeoDataFrame
+campus_center = gpd.GeoDataFrame(
+    {"name": ["Campus Center"]},
+    geometry=[Point(CAMPUS_CENTER_LON, CAMPUS_CENTER_LAT)],
+    crs="EPSG:4326",
+)
 
 # load all data
 data = api.load_all_data()
@@ -17,14 +29,17 @@ mbta_lines, mbta_stations, dorms, food_retail, trader_joes = (
     data["food_retail"],
     data["trader_joes"],
 )
-
-convenience_stores = api.get_convenience_stores(food_retail)
-grocery_stores = api.get_grocery_stores(food_retail)
+boston_food_retail = api.get_boston_food_retail(food_retail)
+convenience_stores = api.get_convenience_stores(boston_food_retail)
+grocery_stores = api.get_grocery_stores(boston_food_retail)
 boston_tjs = api.get_boston_trader_joes(trader_joes)
 line_colors = api.get_line_colors()
+
+# Add nearest store columns and campus distance to dorms
 dorms = api.add_nearest_store_columns(
     dorms, convenience_stores, grocery_stores, boston_tjs
 )
+dorms = api.add_campus_distance(dorms, campus_center)
 
 # Global variable to store user location
 user_location = None
@@ -42,6 +57,14 @@ def create_folium_map(
     selected_lines=None,
 ):
     m = folium.Map(location=[42.3601, -71.0589], zoom_start=12)
+
+    # Add Campus Center marker (first so it's at the bottom layer)
+    folium.Marker(
+        location=[CAMPUS_CENTER_LAT, CAMPUS_CENTER_LON],
+        popup="<b>Northeastern Campus Center</b>",
+        icon=folium.Icon(color="darkred", icon="university", prefix="fa"),
+        tooltip="Campus Center",
+    ).add_to(m)
 
     if show_lines:
         for line_name, color in line_colors.items():
@@ -74,7 +97,8 @@ def create_folium_map(
         for idx, dorm in dorms.iterrows():
             popup_text = f"""<b>Dorm Name:</b> {dorm['Name']}<br>
                             <b>Price Per Semester:</b> {dorm['Price']}<br>
-                            <b>Monthly Estimate:</b> {dorm['MonthlyPriceEstimate']}"""
+                            <b>Monthly Estimate:</b> {dorm['MonthlyPriceEstimate']}<br>
+                            <b>Distance from Campus:</b> {dorm['campus_distance_miles']:.2f} miles"""
 
             if "nearest_grocery_miles" in dorm and pd.notna(
                 dorm["nearest_grocery_miles"]
@@ -158,7 +182,8 @@ def create_folium_map(
     if user_location is not None and len(user_location) > 0:
         user_loc = user_location.iloc[0]
         popup_text = f"""<b>Your Location</b><br>
-                        <b>Address:</b> {user_loc['address']}"""
+                        <b>Address:</b> {user_loc['address']}<br>
+                        <b>Distance from Campus:</b> {user_loc['campus_distance_miles']:.2f} miles"""
 
         if pd.notna(user_loc.get("nearest_grocery_miles")):
             popup_text += f"""<br><br><b>Nearest Grocery:</b> {user_loc['nearest_grocery_name']}<br>
@@ -183,7 +208,7 @@ def create_folium_map(
         for idx, store in grocery_stores.iterrows():
             folium.Marker(
                 location=[store.geometry.y, store.geometry.x],
-                popup=store.get("store_name", "Grocery Store"),
+                popup=store.get("coname", "Grocery Store"),
                 icon=folium.Icon(color="green", icon="shopping-cart", prefix="fa"),
                 tooltip="Grocery Store",
             ).add_to(m)
@@ -193,7 +218,7 @@ def create_folium_map(
         for idx, store in convenience_stores.iterrows():
             folium.Marker(
                 location=[store.geometry.y, store.geometry.x],
-                popup=store.get("store_name", "Pharmacy"),
+                popup=store.get("coname", "Pharmacy"),
                 icon=folium.Icon(color="purple", icon="plus", prefix="fa"),
                 tooltip="Pharmacy",
             ).add_to(m)
@@ -283,8 +308,12 @@ def geocode_user_address(event):
         user_location, convenience_stores, grocery_stores, boston_tjs
     )
 
+    # Calculate distance from campus
+    user_location = api.add_campus_distance(user_location, campus_center)
+
     # Format the info message
     info = f"📍 **Your Location:** {address}\n\n"
+    info += f"🎓 **Distance from Campus:** {user_location.iloc[0]['campus_distance_miles']:.2f} miles\n\n"
 
     if pd.notna(user_location.iloc[0]["nearest_grocery_miles"]):
         info += (
@@ -298,7 +327,7 @@ def geocode_user_address(event):
 
     if pd.notna(user_location.iloc[0]["nearest_tj_miles"]):
         info += (
-            f"�️ **Nearest Trader Joe's:** {user_location.iloc[0]['nearest_tj_name']}\n"
+            f"🛍️ **Nearest Trader Joe's:** {user_location.iloc[0]['nearest_tj_name']}\n"
         )
         info += f"   └ {user_location.iloc[0]['nearest_tj_miles']:.2f} miles"
 

@@ -9,7 +9,105 @@ class DashApi:
     """API for loading and processing geographic and transit data for the MBTA dashboard."""
 
     # Constants
-    BOSTON_ZIPS = [2116, 2115, 2446, 2139, 2494, 2476, 2465, 2138, 1803, 1906, 1960]
+    BOSTON_ZIPS = [
+        # Boston proper
+        2108,
+        2109,
+        2110,
+        2111,
+        2113,
+        2114,
+        2115,
+        2116,
+        2118,
+        2119,
+        2120,
+        2121,
+        2122,
+        2124,
+        2125,
+        2126,
+        2127,
+        2128,
+        2129,
+        2130,
+        2131,
+        2132,
+        2134,
+        2135,
+        2136,
+        2163,
+        2199,
+        2203,
+        2210,
+        2215,
+        2467,
+        # Cambridge
+        2138,
+        2139,
+        2140,
+        2141,
+        2142,
+        # Somerville
+        2143,
+        2144,
+        2145,
+        # Brookline
+        2445,
+        2446,
+        2447,
+        # Newton
+        2458,
+        2459,
+        2460,
+        2461,
+        2462,
+        2464,
+        2465,
+        2466,
+        2468,
+        # Quincy
+        2169,
+        2170,
+        2171,
+        # Chelsea
+        2150,
+        # Everett
+        2149,
+        # Malden
+        2148,
+        # Medford
+        2155,
+        # Revere
+        2151,
+        # Winthrop
+        2152,
+        # Watertown
+        2472,
+        # Belmont
+        2478,
+        # Arlington
+        2474,
+        2476,
+        # Lexington
+        2420,
+        2421,
+        # Waltham
+        2451,
+        2452,
+        2453,
+        2454,
+        # Woburn
+        1801,
+        1815,
+        1888,
+        # Milton
+        2186,
+        2187,
+        # Dedham
+        2026,
+        2027,
+    ]
     STORE_TYPE_CONVENIENCE = "Convenience Stores, Pharmacies, and Drug Stores"
     STORE_TYPE_GROCERY = "Supermarket or Other Grocery"
     METERS_PER_MILE = 1609.34
@@ -145,6 +243,10 @@ class DashApi:
             DataFrame subset containing only Boston-area Trader Joe's
         """
         return self.filter_by_column(data, "postal_cod", self.BOSTON_ZIPS)
+
+    def get_boston_food_retail(self, data: pd.DataFrame) -> pd.DataFrame:
+        """ """
+        return self.filter_by_column(data, "zip", self.BOSTON_ZIPS)
 
     # ============================================================================
     # CRS and Geometry Operations
@@ -318,3 +420,26 @@ class DashApi:
         )
 
         return gdf
+
+    def add_campus_distance(
+        self, locations: gpd.GeoDataFrame, campus_center: gpd.GeoDataFrame
+    ) -> gpd.GeoDataFrame:
+        """
+        Add campus distance columns to a GeoDataFrame.
+
+        Args:
+            locations: GeoDataFrame containing locations (dorms or user locations)
+            campus_center: GeoDataFrame with campus center point
+
+        Returns:
+            Modified GeoDataFrame with campus distance columns added
+        """
+        campus_geom = campus_center.iloc[0].geometry
+
+        for idx, location in locations.iterrows():
+            dist, _ = self.find_nearest_store(location.geometry, campus_center)
+            if dist is not None:
+                locations.at[idx, "campus_distance_m"] = dist
+                locations.at[idx, "campus_distance_miles"] = dist / self.METERS_PER_MILE
+
+        return locations
