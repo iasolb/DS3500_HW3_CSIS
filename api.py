@@ -1,6 +1,8 @@
 import pandas as pd
 import geopandas as gpd
 from typing import Dict, Tuple, Optional
+
+from sympy import Point
 from geopy.geocoders import Nominatim
 from geopy.exc import GeocoderTimedOut, GeocoderServiceError
 
@@ -121,7 +123,8 @@ class DashApi:
         "BLUE": "blue",
         "SILVER": "gray",
     }
-
+    CAMPUS_CENTER_LON = -71.08828995722925
+    CAMPUS_CENTER_LAT = 42.34010543470205
     # ============================================================================
     # Data Loading Methods
     # ============================================================================
@@ -145,6 +148,17 @@ class DashApi:
             gdf = gpd.GeoDataFrame(df, geometry="geometry", crs=self.WGS84)
         return gdf
 
+    def get_campus_center_coords(self) -> Tuple[float, float]:
+        return self.CAMPUS_CENTER_LAT, self.CAMPUS_CENTER_LON
+
+    def get_campus_center_gdf(self):
+        campus_center = gpd.GeoDataFrame(
+            {"name": ["Campus Center"]},
+            geometry=[Point(self.CAMPUS_CENTER_LON, self.CAMPUS_CENTER_LAT)],
+            crs=self.WGS84,
+        )
+        return campus_center
+
     def load_all_data(self, data_dir: str = "data") -> Dict[str, gpd.GeoDataFrame]:
         """
         Load all required datasets for the dashboard.
@@ -165,7 +179,7 @@ class DashApi:
                 shapefile=True,
             ),
             "dorms": self.get_GDF(
-                f"{data_dir}/NortheasternDorm_data/dorms_with_prices.csv",
+                f"{data_dir}/NortheasternDorm_data/layers/dorms_with_prices.csv",
                 shapefile=False,
             ),
             "food_retail": self.get_GDF(

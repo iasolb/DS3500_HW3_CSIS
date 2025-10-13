@@ -9,16 +9,10 @@ pn.extension()
 
 api = DashApi()
 
-# Campus Center coordinates
+# get campus center
 CAMPUS_CENTER_LON = -71.08828995722925
 CAMPUS_CENTER_LAT = 42.34010543470205
-
-# Create Campus Center GeoDataFrame
-campus_center = gpd.GeoDataFrame(
-    {"name": ["Campus Center"]},
-    geometry=[Point(CAMPUS_CENTER_LON, CAMPUS_CENTER_LAT)],
-    crs="EPSG:4326",
-)
+campus_center = api.get_campus_center_gdf()
 
 # load all data
 data = api.load_all_data()
@@ -41,7 +35,7 @@ dorms = api.add_nearest_store_columns(
 )
 dorms = api.add_campus_distance(dorms, campus_center)
 
-# Global variable to store user location
+# init global variable to store user location
 user_location = None
 
 
@@ -319,17 +313,17 @@ def geocode_user_address(event):
         info += (
             f"🛒 **Nearest Grocery:** {user_location.iloc[0]['nearest_grocery_name']}\n"
         )
-        info += f"   └ {user_location.iloc[0]['nearest_grocery_miles']:.2f} miles\n\n"
+        info += f"    {user_location.iloc[0]['nearest_grocery_miles']:.2f} miles\n\n"
 
     if pd.notna(user_location.iloc[0]["nearest_pharmacy_miles"]):
         info += f"💊 **Nearest Pharmacy:** {user_location.iloc[0]['nearest_pharmacy_name']}\n"
-        info += f"   └ {user_location.iloc[0]['nearest_pharmacy_miles']:.2f} miles\n\n"
+        info += f"    {user_location.iloc[0]['nearest_pharmacy_miles']:.2f} miles\n\n"
 
     if pd.notna(user_location.iloc[0]["nearest_tj_miles"]):
         info += (
             f"🛍️ **Nearest Trader Joe's:** {user_location.iloc[0]['nearest_tj_name']}\n"
         )
-        info += f"   └ {user_location.iloc[0]['nearest_tj_miles']:.2f} miles"
+        info += f"    {user_location.iloc[0]['nearest_tj_miles']:.2f} miles"
 
     user_location_info.object = info
 
