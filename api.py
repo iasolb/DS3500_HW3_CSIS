@@ -152,12 +152,13 @@ class DashApi:
         return self.CAMPUS_CENTER_LAT, self.CAMPUS_CENTER_LON
 
     def get_campus_center_gdf(self):
-        campus_center = gpd.GeoDataFrame(
+        lon = float(self.CAMPUS_CENTER_LON)
+        lat = float(self.CAMPUS_CENTER_LAT)
+        return gpd.GeoDataFrame(
             {"name": ["Campus Center"]},
-            geometry=[Point(self.CAMPUS_CENTER_LON, self.CAMPUS_CENTER_LAT)],
+            geometry=gpd.points_from_xy([lon], [lat]),
             crs=self.WGS84,
         )
-        return campus_center
 
     def load_all_data(self, data_dir: str = "data") -> Dict[str, gpd.GeoDataFrame]:
         """
